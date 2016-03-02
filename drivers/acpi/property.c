@@ -794,13 +794,13 @@ int acpi_node_prop_read(struct fwnode_handle *fwnode,  const char *propname,
 
 /**
  * acpi_get_next_subnode - Return the next child node handle for a device.
- * @dev: Device to find the next child node for.
+ * @fwnode: Handle to the device to find the next child node for.
  * @child: Handle to one of the device's child nodes or a null handle.
  */
-struct fwnode_handle *acpi_get_next_subnode(struct device *dev,
+struct fwnode_handle *acpi_get_next_subnode(struct fwnode_handle *fwnode,
 					    struct fwnode_handle *child)
 {
-	struct acpi_device *adev = ACPI_COMPANION(dev);
+	struct acpi_device *adev = to_acpi_device_node(fwnode);
 	struct list_head *head, *next;
 
 	if (!adev)
@@ -816,7 +816,7 @@ struct fwnode_handle *acpi_get_next_subnode(struct device *dev,
 			next = adev->node.next;
 			if (next == head) {
 				child = NULL;
-				adev = ACPI_COMPANION(dev);
+				adev = to_acpi_device_node(fwnode);
 				goto nondev;
 			}
 			adev = list_entry(next, struct acpi_device, node);

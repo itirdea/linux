@@ -867,6 +867,28 @@ int device_add_properties(struct device *dev, struct property_entry *properties)
 EXPORT_SYMBOL_GPL(device_add_properties);
 
 /**
+ * fwnode_get_next_child_node - Return the next child node handle for a device
+ * @fwnode: Handle to the device to find the next child node for.
+ * @child: Handle to one of the device's child nodes or a null handle.
+ */
+struct fwnode_handle *fwnode_get_next_child_node(struct fwnode_handle *fwnode,
+						 struct fwnode_handle *child)
+{
+	if (IS_ENABLED(CONFIG_OF) && to_of_node(fwnode)) {
+		struct device_node *node;
+
+		node = of_get_next_available_child(to_of_node(fwnode),
+						   to_of_node(child));
+		if (node)
+			return &node->fwnode;
+	} else if (IS_ENABLED(CONFIG_ACPI)) {
+		return acpi_get_next_subnode(fwnode, child);
+	}
+	return NULL;
+}
+EXPORT_SYMBOL_GPL(fwnode_get_next_child_node);
+
+/**
  * device_get_next_child_node - Return the next child node handle for a device
  * @dev: Device to find the next child node for.
  * @child: Handle to one of the device's child nodes or a null handle.
@@ -874,16 +896,7 @@ EXPORT_SYMBOL_GPL(device_add_properties);
 struct fwnode_handle *device_get_next_child_node(struct device *dev,
 						 struct fwnode_handle *child)
 {
-	if (IS_ENABLED(CONFIG_OF) && dev->of_node) {
-		struct device_node *node;
-
-		node = of_get_next_available_child(dev->of_node, to_of_node(child));
-		if (node)
-			return &node->fwnode;
-	} else if (IS_ENABLED(CONFIG_ACPI)) {
-		return acpi_get_next_subnode(dev, child);
-	}
-	return NULL;
+	return fwnode_get_next_child_node(dev_fwnode(dev), child);
 }
 EXPORT_SYMBOL_GPL(device_get_next_child_node);
 
@@ -1024,3 +1037,14 @@ void *device_get_mac_address(struct device *dev, char *addr, int alen)
 	return device_get_mac_addr(dev, "address", addr, alen);
 }
 EXPORT_SYMBOL(device_get_mac_address);
+
+const char *fwnode_get_name(struct fwnode_handle *fwnode)
+{
+	if (is_of_node(fwnode))
+		return of_node_full_name(to_of_node(fwnode));
+	else if (is_acpi_node(fwnode))
+		return acpi_dev_name(to_acpi_device_node(fwnode));
+
+	return NULL;
+}
+EXPORT_SYMBOL(fwnode_get_name);

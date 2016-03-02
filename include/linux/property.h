@@ -70,8 +70,15 @@ int fwnode_property_read_string(struct fwnode_handle *fwnode,
 int fwnode_property_match_string(struct fwnode_handle *fwnode,
 				 const char *propname, const char *string);
 
+struct fwnode_handle *fwnode_get_next_child_node(struct fwnode_handle *fwnode,
+						 struct fwnode_handle *child);
+
 struct fwnode_handle *device_get_next_child_node(struct device *dev,
 						 struct fwnode_handle *child);
+
+#define fwnode_for_each_child_node(fwnode, child)			\
+	for (child = fwnode_get_next_child_node(fwnode, NULL); child;	\
+	     child = fwnode_get_next_child_node(fwnode, child))
 
 #define device_for_each_child_node(dev, child)				\
 	for (child = device_get_next_child_node(dev, NULL); child;	\
@@ -249,5 +256,7 @@ enum dev_dma_attr device_get_dma_attr(struct device *dev);
 int device_get_phy_mode(struct device *dev);
 
 void *device_get_mac_address(struct device *dev, char *addr, int alen);
+
+const char *fwnode_get_name(struct fwnode_handle *fwnode);
 
 #endif /* _LINUX_PROPERTY_H_ */
