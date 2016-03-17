@@ -275,6 +275,14 @@ Pinctrl "sleep" state provides power management capabilities to the device that 
 conflict with ACPI power management methods. Special care must be taken when using
 the "sleep" state not to create conflicts with the existing ACPI configuration.
 
+== GpioInt()/GpioIo() _CRS resources ==
+
+If the device has any GpioInt/GpioIo _CRS ACPI resources, they are parsed so
+that the pin configuration information is used (e.g. PullUp/PullDown/PullNone).
+The pin configuration from GpioInt/GpioIo will be associated with the "default"
+state, only if such a state is defined in the _DSD of the device. If no
+"default" state is defined, the GPIO configuration from _CRS will be ignored.
+
 == References ==
 
 [1] Documentation/pinctrl.txt
