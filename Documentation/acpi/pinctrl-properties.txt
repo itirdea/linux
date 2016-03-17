@@ -1,0 +1,284 @@
+= _DSD Device Properties related to pin controllers =
+
+== Introduction ==
+
+This document is an extension of the pin control subsystem in Linux [1]
+and provides a way to describe pin controller properties in ACPI. It is
+based on the Device Specific Data (_DSD) configuration object [2] that
+was introduced in ACPI 5.1.
+
+Pin controllers are hardware modules that control pins by allowing pin
+multiplexing and configuration. Pin multiplexing allows using the same
+physical pins for multiple functions; for example, one pin or group of pins
+may be used for the I2C bus, SPI bus or as general-purpose GPIO pin. Pin
+configuration allows setting various properties such as pull-up/down,
+tri-state, drive-strength, etc.
+
+Hardware modules whose signals are affected by pin configuration are
+designated client devices. For a client device to operate correctly,
+certain pin controllers must set up certain specific pin configurations.
+Some client devices need a single static pin configuration, e.g. set up
+during initialization. Others need to reconfigure pins at run-time,
+for example to tri-state pins when the device is inactive. Hence, each
+client device can define a set of named states. Each named state is
+mapped to a pin controller configuration that describes the pin multiplexing
+or configuration for that state.
+
+In ACPI, each pin controller and each client device is represented as an
+ACPI device, just like any other hardware module. The pin controller
+properties are defined using _DSD properties [2] under these devices.
+The named states are defined using Device Properties UUID [3] under the
+ACPI client device. The configuration nodes are defined using Hierarchical
+Properties Extension UUID [4] and are split between the ACPI client device
+and the pin controller device. The configuration nodes contain properties
+that describe pin multiplexing or configuration that very similar to the
+ones used for device tree [5].
+
+== Example ==
+
+For example, let's consider an accelerometer connected to the I2C bus on
+a platform with a Baytrail pin controller. The accelerometer uses 2 GPIO
+pins for I2C (SDA, SCL) and one GPIO pin for interrupt.
+
+The name for the pins, groups and functions used are the ones defined in the
+pin controller driver, in the same way as it is done for device tree [5].
+
+For the I2C pins, the pin controller driver defines one group called
+"i2c5_grp" that can be multiplexed with functions "i2c" or "gpio".
+In our case, we need to select function "i2c" for group "i2c5_grp" in
+the ACPI description.
+
+For the GPIO pin, the pin controller driver defines the name "GPIO_S50"
+for the pin with index 0 that we use. We need to configure this pin to
+pull-down with pull strength of 10000 Ohms. We might also want to disable
+the bias for the GPIO interrupt pin when entering sleep.
+
+Here is an ASL example for this device:
+
+  // Pin controller device
+  Scope (_SB.GPO0)
+  {
+      Name (MUX0, Package()
+      {
+          ToUUID("daffd814-6eba-4d8c-8a91-bc9bbf4aa301"),
+          Package()
+          {
+              Package (2) {"function", "i2c"},
+              Package (2) {"groups", Package () {"i2c5_grp"}},
+          }
+      })
+
+      Name (CFG0, Package()
+      {
+          ToUUID("daffd814-6eba-4d8c-8a91-bc9bbf4aa301"),
+          Package()
+          {
+              Package (2) {"pins", Package () {"GPIO_S50"}},
+              Package (2) {"bias-pull-down", 10000},
+          }
+      })
+
+      Name (CFG1, Package()
+      {
+          ToUUID("daffd814-6eba-4d8c-8a91-bc9bbf4aa301"),
+          Package()
+          {
+              Package (2) {"pins", Package () {"GPIO_S50"}},
+              Package (2) {"bias-disable", 0},
+          }
+      })
+  }
+
+  // Accelerometer device with default pinmux and pinconfig for i2c and
+  // GPIO pins
+  Scope (_SB.I2C0)
+  {
+      Device (ACL0)
+      {
+          Name (_HID, ...)
+
+          Method (_CRS, 0, Serialized)
+          {
+              Name (RBUF, ResourceTemplate ()
+              {
+                  I2cSerialBus (...)
+                  GpioInt (Edge, ActiveHigh, Exclusive, PullDown, 0x0000,
+                           "\\_SB.GPO0", 0x00, ResourceConsumer, , ) { 0 }
+              })
+              Return (RBUF)
+          }
+
+          Name (_DSD, Package ()
+          {
+              ToUUID("daffd814-6eba-4d8c-8a91-bc9bbf4aa301"),
+              Package ()
+              {
+                  Package () {"pinctrl-names", Package() {"default", "sleep"}},
+                  Package ()
+                  {
+                      "pinctrl-0",
+                      Package()
+                      {
+                          "accel-default-mux-i2c",
+                          "accel-default-cfg-int",
+                      }
+                  },
+                  Package ()
+                  {
+                      "pinctrl-1",
+                      Package()
+                      {
+                          "accel-sleep-cfg-int",
+                      }
+                  },
+
+              },
+              ToUUID("dbb8e3e6-5886-4ba6-8795-1319f52a966b"),
+              Package ()
+              {
+                  Package (2) {"accel-default-mux-i2c", "\\_SB.GPO0.MUX0"},
+                  Package (2) {"accel-default-cfg-int", "\\_SB.GPO0.CFG0"},
+                  Package (2) {"accel-sleep-cfg-int", "\\_SB.GPO0.CFG1"},
+              },
+          })
+      }
+  }
+
+In the ASL excerpt, the accelerometer device has 2 states:
+  - a default state with 2 pin configurations:
+    - a pin multiplexing node for the i2c pins that sets function "i2c"
+      for the "i2c5_grp" pin group
+    - a pin configuration node for the GPIO interrupt pin that pull down
+      the "GPIO_S50" pin and sets a pull strength of 10000 Ohms
+  - a sleep state with 1 pin configuration:
+    - a pin configuration node for pin "GPIO_S50" that disables pin
+    bias
+
+== _DSD pinctrl properties format ==
+
+=== Pin controller client device states  ===
+
+The pinctrl states are defined under the device node they apply to.
+The format of the pinctrl states is:
+
+  Name (_DSD, Package ()
+  {
+      ToUUID("daffd814-6eba-4d8c-8a91-bc9bbf4aa301"),
+      Package ()
+      {
+          Package () {"pinctrl-names", Package() {"statename0", "statename1", ...}},
+          Package () {"pinctrl-0", Package() {"cfgname0", "cfgname1", ...}},
+          Package () {"pinctrl-1", Package() {"cfgname2", "cfgname3", ...}},
+      }
+  }
+
+  statename - name of the pinctrl device state (e.g.: default, sleep, etc.).
+              These names are associated with the lists of configurations
+	      defined below: statename0 defines the name for configuration
+	      property "pinctrl-0", statename1 defines the name for
+	      configuration property "pinctrl-1", etc.
+  cfgname - name for the configuration data-only subnode.
+
+=== Pin controller configuration nodes  ===
+
+The configuration data-only subnodes are defined using the Hierarchical
+Properties Extension UUID [4]. Their definition is split between the device
+node and the pin controller node. The format for these subnodes is:
+
+  Scope (DEV0)
+  {
+      Name (_DSD, Package ()
+      {
+          ToUUID("dbb8e3e6-5886-4ba6-8795-1319f52a966b"),
+          Package ()
+          {
+              Package (2) {"cfgname0", "\\GPO0.MUX0"},
+              Package (2) {"cfgname1", "\\GPO0.CFG0"},
+          },
+      })
+  }
+
+  Scope (GPO0)
+  {
+      Name (MUX0, Package()
+      {
+          ToUUID("daffd814-6eba-4d8c-8a91-bc9bbf4aa301"),
+          Package() {...}
+      })
+      Name (CFG0, Package()
+      {
+          ToUUID("daffd814-6eba-4d8c-8a91-bc9bbf4aa301"),
+          Package() {...}
+      })
+  }
+
+Each data subnode (MUX0, CFG0) is a regular _DSD node that uses Device
+Properties UUID [3]. There are 2 types of subnodes, depending on the properties
+it contains: pin multiplexing nodes and pin configuration nodes.
+
+==== Pin multiplexing nodes  ====
+
+The pin multiplexing nodes must contain a property named "function" and
+define a mux function to be applied to a list of pin groups. The properties
+supported by this node are the same as for device tree [5]. The name for the
+pins, groups and functions used are the ones defined in the pin controller
+driver, in the same way as it is done for device tree [5]. The format for
+this data subnode is:
+
+  Name (MUX0, Package()
+  {
+      ToUUID("daffd814-6eba-4d8c-8a91-bc9bbf4aa301"),
+          Package()
+          {
+              Package (2) {"function", "functioname"},
+              Package (2) {"groups", Package () {"groupname1", "groupname2", ...}},
+          }
+  })
+
+  functioname - the pinmux function to select.
+  groups - the list of groups to select with this function
+
+==== Pin configuration nodes  ====
+
+The pin configuration nodes do not contain a property named "function".
+They must contain a property named "group" or "pins". They will also
+contain one or more configuration properties like bias-pull-up,
+drive-open-drain, etc. The properties supported by this node are the
+same as for device tree. Standard pinctrl properties are defined in the
+device tree documentation [5] and in <include/linux/pinctrl/pinconf-generic.h>.
+Pinctrl drivers may also define their own custom properties. The name for the
+pins/groups  used are the ones defined in the pin controller driver, in the
+same way as it is done for device tree [5]. The format for the data subnode is:
+
+  Name (CFG0, Package()
+  {
+      ToUUID("daffd814-6eba-4d8c-8a91-bc9bbf4aa301"),
+          Package()
+          {
+              Package (2) {"pins", Package () {"pinname1", "pinname2", ...}},
+              Package (2) {"configname1", configval1},
+              Package (2) {"configname2", configval2},
+          }
+  })
+
+  pinname - list of pins that properties in the node apply to
+  configname - name of the pin configuration property
+  configval - value of the pin configuration property
+
+== Restrictions and recommendations ==
+
+Pin multiplexing allows using the same pins for multiple functions. When setting
+the pin multiplexing configuration, care must be taken not to disable functionality
+needed in the rest of the ACPI configuration.
+
+Pinctrl "sleep" state provides power management capabilities to the device that may
+conflict with ACPI power management methods. Special care must be taken when using
+the "sleep" state not to create conflicts with the existing ACPI configuration.
+
+== References ==
+
+[1] Documentation/pinctrl.txt
+[2] http://www.uefi.org/sites/default/files/resources/_DSD-implementation-guide-toplevel-1_1.htm
+[3] http://www.uefi.org/sites/default/files/resources/_DSD-device-properties-UUID.pdf
+[4] http://www.uefi.org/sites/default/files/resources/_DSD-hierarchical-data-extension-UUID-v1.pdf
+[5] Documentation/devicetree/bindings/pinctrl/pinctrl-bindings.txt
