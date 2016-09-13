@@ -15,6 +15,8 @@
  * Software Foundation; version 2 of the License.
  */
 
+#define DEBUG
+
 #include <linux/kernel.h>
 #include <linux/dmi.h>
 #include <linux/firmware.h>
